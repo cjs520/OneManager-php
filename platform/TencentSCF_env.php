@@ -60,11 +60,11 @@ function getConfig($str, $disktag = '')
         if ($disktag=='') $disktag = $_SERVER['disktag'];
         $env = json_decode(getenv($disktag), true);
         if (isset($env[$str])) {
-            if (in_array($str, $Base64Env)) return equal_replace($env[$str],1);
+            if (in_array($str, $Base64Env)) return base64y_decode($env[$str]);
             else return $env[$str];
         }
     } else {
-        if (in_array($str, $Base64Env)) return equal_replace(getenv($str),1);
+        if (in_array($str, $Base64Env)) return base64y_decode(getenv($str));
         else return getenv($str);
     }
     return '';
@@ -82,7 +82,7 @@ function setConfig($arr, $disktag = '')
     $oparetdisk = 0;
     foreach ($arr as $k => $v) {
         if (in_array($k, $InnerEnv)) {
-            if (in_array($k, $Base64Env)) $diskconfig[$k] = equal_replace($v);
+            if (in_array($k, $Base64Env)) $diskconfig[$k] = base64y_encode($v);
             else $diskconfig[$k] = $v;
             $indisk = 1;
         } elseif ($k=='disktag_add') {
@@ -93,7 +93,7 @@ function setConfig($arr, $disktag = '')
             $tmp[$v] = '';
             $oparetdisk = 1;
         } else {
-            if (in_array($k, $Base64Env)) $tmp[$k] = equal_replace($v);
+            if (in_array($k, $Base64Env)) $tmp[$k] = base64y_encode($v);
             else $tmp[$k] = $v;
         }
     }
@@ -127,7 +127,12 @@ function install()
     global $constStr;
     if ($_GET['install2']) {
         $tmp['admin'] = $_POST['admin'];
-        setConfig($tmp);
+        $response = setConfigResponse( setConfig($tmp) );
+        if (api_error($response)) {
+            $html = api_error_msg($response);
+            $title = 'Error';
+            return message($html, $title, 201);
+        }
         if (needUpdate()) {
             OnekeyUpate();
             return message('update to github version, reinstall.
@@ -372,7 +377,7 @@ function SetbaseConfig($Envs, $function_name, $Region, $Namespace, $SecretId, $S
     $tmpdata['Timestamp'] = time();
     $tmpdata['Token'] = '';
     $tmpdata['Version'] = '2018-04-16';
-    $tmpdata['Description'] = 'Onedrive index and manager in SCF.';
+    $tmpdata['Description'] = 'Onedrive index and manager in Tencent SCF.';
     $tmpdata['MemorySize'] = 64;
     $tmpdata['Timeout'] = 30;
     $data = ReorganizeDate($tmpdata);

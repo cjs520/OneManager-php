@@ -4,17 +4,21 @@ function getpath()
 {
     $_SERVER['firstacceptlanguage'] = strtolower(splitfirst(splitfirst($_SERVER['HTTP_ACCEPT_LANGUAGE'],';')[0],',')[0]);
     if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) $_SERVER['REMOTE_ADDR'] = $_SERVER['HTTP_X_FORWARDED_FOR'];
-    $_SERVER['base_path'] = path_format(substr($_SERVER['SCRIPT_NAME'], 0, -10) . '/');
+    if (isset($_SERVER['DOCUMENT_ROOT'])&&$_SERVER['DOCUMENT_ROOT']==='/app') $_SERVER['base_path'] = '/';
+    else $_SERVER['base_path'] = path_format(substr($_SERVER['SCRIPT_NAME'], 0, -10) . '/');
+    if (isset($_SERVER['UNENCODED_URL'])) $_SERVER['REQUEST_URI'] = $_SERVER['UNENCODED_URL'];
     $p = strpos($_SERVER['REQUEST_URI'],'?');
     if ($p>0) $path = substr($_SERVER['REQUEST_URI'], 0, $p);
     else $path = $_SERVER['REQUEST_URI'];
     $path = path_format( substr($path, strlen($_SERVER['base_path'])) );
-    return substr($path, 1);
+    return $path;
+    //return substr($path, 1);
     //return spurlencode($path, '/');
 }
 
 function getGET()
 {
+    if (isset($_SERVER['UNENCODED_URL'])) $_SERVER['REQUEST_URI'] = $_SERVER['UNENCODED_URL'];
     $p = strpos($_SERVER['REQUEST_URI'],'?');
     if ($p>0) {
         $getstr = substr($_SERVER['REQUEST_URI'], $p+1);
@@ -43,19 +47,20 @@ function getConfig($str, $disktag = '')
     global $InnerEnv;
     global $Base64Env;
     //include 'config.php';
-    $s = file_get_contents('config.php');
-    $configs = substr($s, 18, -2);
+    $s = file_get_contents('.data/config.php');
+    //$configs = substr($s, 18, -2);
+    $configs = '{' . splitlast(splitfirst($s, '{')[1], '}')[0] . '}';
     if ($configs!='') {
         $envs = json_decode($configs, true);
         if (in_array($str, $InnerEnv)) {
             if ($disktag=='') $disktag = $_SERVER['disktag'];
             if (isset($envs[$disktag][$str])) {
-                if (in_array($str, $Base64Env)) return equal_replace($envs[$disktag][$str],1);
+                if (in_array($str, $Base64Env)) return base64y_decode($envs[$disktag][$str]);
                 else return $envs[$disktag][$str];
             }
         } else {
             if (isset($envs[$str])) {
-                if (in_array($str, $Base64Env)) return equal_replace($envs[$str],1);
+                if (in_array($str, $Base64Env)) return base64y_decode($envs[$str]);
                 else return $envs[$str];
             }
         }
@@ -69,15 +74,16 @@ function setConfig($arr, $disktag = '')
     global $Base64Env;
     if ($disktag=='') $disktag = $_SERVER['disktag'];
     //include 'config.php';
-    $s = file_get_contents('config.php');
-    $configs = substr($s, 18, -2);
+    $s = file_get_contents('.data/config.php');
+    //$configs = substr($s, 18, -2);
+    $configs = '{' . splitlast(splitfirst($s, '{')[1], '}')[0] . '}';
     if ($configs!='') $envs = json_decode($configs, true);
     $disktags = explode("|",getConfig('disktag'));
     $indisk = 0;
     $operatedisk = 0;
     foreach ($arr as $k => $v) {
         if (in_array($k, $InnerEnv)) {
-            if (in_array($k, $Base64Env)) $envs[$disktag][$k] = equal_replace($v);
+            if (in_array($k, $Base64Env)) $envs[$disktag][$k] = base64y_encode($v);
             else $envs[$disktag][$k] = $v;
             $indisk = 1;
         } elseif ($k=='disktag_add') {
@@ -88,7 +94,7 @@ function setConfig($arr, $disktag = '')
             $envs[$v] = '';
             $operatedisk = 1;
         } else {
-            if (in_array($k, $Base64Env)) $envs[$k] = equal_replace($v);
+            if (in_array($k, $Base64Env)) $envs[$k] = base64y_encode($v);
             else $envs[$k] = $v;
         }
     }
@@ -107,11 +113,11 @@ function setConfig($arr, $disktag = '')
     $envs = array_filter($envs, 'array_value_isnot_null');
     ksort($envs);
     //echo '<pre>'. json_encode($envs, JSON_PRETTY_PRINT).'</pre>';
-    $prestr = '<?php $configs = \'
-';
-    $aftstr = '
-\';';
-    return file_put_contents('config.php', $prestr . json_encode($envs, JSON_PRETTY_PRINT) . $aftstr);
+    $prestr = '<?php $configs = \'' . PHP_EOL;
+    $aftstr = PHP_EOL . '\';';
+    $response = file_put_contents('.data/config.php', $prestr . json_encode($envs, JSON_PRETTY_PRINT) . $aftstr);
+    if ($response>0) return json_encode( [ 'response' => 'success' ] );
+    return json_encode( [ 'message' => 'Failed to write config.', 'code' => 'failed' ] );
 }
 
 function install()
@@ -122,7 +128,7 @@ function install()
             $tmp['admin'] = $_POST['admin'];
             //$tmp['language'] = $_COOKIE['language'];
             $tmp['timezone'] = $_COOKIE['timezone'];
-            $response = setConfig($tmp);
+            $response = setConfigResponse( setConfig($tmp) );
             if (api_error($response)) {
                 $html = api_error_msg($response);
                 $title = 'Error';
@@ -178,7 +184,7 @@ function install()
             //if (location.port!="") url += ":" + location.port;
             url += location.pathname;
             if (url.substr(-1)!="/") url += "/";
-            url += "config.php";
+            url += ".data/config.php";
             //alert(url);
             var xhr4 = new XMLHttpRequest();
             xhr4.open("GET", url);
@@ -191,7 +197,7 @@ function install()
                     document.getElementById("submitbtn").disabled = false;
                     document.getElementById("formdiv").style.display = "";
                 } else {
-                    alert(url+"\n"+xhr4.status);
+                    alert("Url: " + url + "\nExpect http code 201, but received " + xhr4.status);
                 }
             }
         }
@@ -243,7 +249,7 @@ function RewriteEngineOn()
 {
     $http_type = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https')) ? 'https://' : 'http://';
     $tmpurl = $http_type . $_SERVER['SERVER_NAME'].':'.$_SERVER['SERVER_PORT'];
-    $tmpurl .= path_format($_SERVER['base_path'] . '/config.php');
+    $tmpurl .= path_format($_SERVER['base_path'] . '/.data/config.php');
     $tmp = curl_request($tmpurl);
     if ($tmp['stat']==200) return false;
     if ($tmp['stat']==201) return true; //when install return 201, after installed return 404 or 200;
@@ -252,29 +258,31 @@ function RewriteEngineOn()
 
 function api_error($response)
 {
-    return !$response;
+    return isset($response['message']);
 }
 
 function api_error_msg($response)
 {
-    return $response . '<br>
-Can not write config to file.<br>
+    return $response['code'] . '<br>
+' . $response['message'] . '<br>
 <button onclick="location.href = location.href;">'.getconstStr('Refresh').'</button>';
 }
 
 function setConfigResponse($response)
 {
-    return $response;
+    return json_decode($response, true);
 }
 
 function OnekeyUpate($auth = 'qkqpttgf', $project = 'OneManager-php', $branch = 'master')
 {
+    $slash = '/';
+    if (strpos(__DIR__, ':')) $slash = '\\';
     // __DIR__ is xxx/platform
-    $projectPath = splitlast(__DIR__, '/')[0];
+    $projectPath = splitlast(__DIR__, $slash)[0];
 
     // 从github下载对应tar.gz，并解压
     $url = 'https://github.com/' . $auth . '/' . $project . '/tarball/' . urlencode($branch) . '/';
-    $tarfile = $projectPath.'/github.tar.gz';
+    $tarfile = $projectPath . $slash .'github.tar.gz';
     $githubfile = file_get_contents($url);
     if (!$githubfile) return 0;
     file_put_contents($tarfile, $githubfile);
@@ -283,17 +291,17 @@ function OnekeyUpate($auth = 'qkqpttgf', $project = 'OneManager-php', $branch = 
         $phar->extractTo($projectPath, null, true);//路径 要解压的文件 是否覆盖
     } else {
         ob_start();
-        passthru('tar -xzvf '.$tarfile,$stat);
+        passthru('tar -xzvf ' . $tarfile, $stat);
         ob_get_clean();
     }
     unlink($tarfile);
 
     $outPath = '';
     $tmp = scandir($projectPath);
-    $name = $auth.'-'.$project;
+    $name = $auth . '-' . $project;
     foreach ($tmp as $f) {
         if ( substr($f, 0, strlen($name)) == $name) {
-            $outPath = $projectPath . '/' . $f;
+            $outPath = $projectPath . $slash . $f;
             break;
         }
     }
@@ -301,31 +309,41 @@ function OnekeyUpate($auth = 'qkqpttgf', $project = 'OneManager-php', $branch = 
     if ($outPath=='') return 0;
 
     //unlink($outPath.'/config.php');
-    rename($projectPath.'/config.php', $outPath.'/config.php');
-
-    return moveFolder($outPath, $projectPath);
+    $response = rename($projectPath . $slash . '.data' . $slash . 'config.php', $outPath . $slash . '.data' . $slash . 'config.php');
+    if (!$response) {
+        $tmp1['code'] = "Move Failed";
+        $tmp1['message'] = "Can not move " . $projectPath . $slash . '.data' . $slash . 'config.php' . " to " . $outPath . $slash . '.data' . $slash . 'config.php';
+        return json_encode($tmp1);
+    }
+    return moveFolder($outPath, $projectPath, $slash);
 }
 
-function moveFolder($from, $to)
+function moveFolder($from, $to, $slash)
 {
-    if (substr($from, -1)=='/') $from = substr($from, 0, -1);
-    if (substr($to, -1)=='/') $to = substr($to, 0, -1);
+    if (substr($from, -1)==$slash) $from = substr($from, 0, -1);
+    if (substr($to, -1)==$slash) $to = substr($to, 0, -1);
     if (!file_exists($to)) mkdir($to, 0777);
     $handler=opendir($from);
     while($filename=readdir($handler)) {
         if($filename != '.' && $filename != '..'){
-            $fromfile = $from.'/'.$filename;
-            $tofile = $to.'/'.$filename;
+            $fromfile = $from . $slash . $filename;
+            $tofile = $to . $slash . $filename;
             if(is_dir($fromfile)){// 如果读取的某个对象是文件夹，则递归
-                moveFolder($fromfile, $tofile);
+                $response = moveFolder($fromfile, $tofile, $slash);
+                if (api_error(setConfigResponse($response))) return $response;
             }else{
                 //if (file_exists($tofile)) unlink($tofile);
-                rename($fromfile, $tofile);
+                $response = rename($fromfile, $tofile);
+                if (!$response) {
+                    $tmp['code'] = "Move Failed";
+                    $tmp['message'] = "Can not move " . $fromfile . " to " . $tofile;
+                    return json_encode($tmp);
+                }
                 if (file_exists($fromfile)) unlink($fromfile);
             }
         }
     }
     closedir($handler);
     rmdir($from);
-    return 1;
+    return json_encode( [ 'response' => 'success' ] );
 }
